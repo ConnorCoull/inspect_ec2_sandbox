@@ -190,12 +190,6 @@ class Ec2SandboxEnvironment(SandboxEnvironment):
             (MARKER_TAG_KEY, "true"),
         ]
 
-        cls.logger.debug(
-            "sample_init: provider=%s type=%s ami=%s",
-            type(provider).__name__,
-            resolved.instance_type,
-            resolved.ami_id,
-        )
         # Pass volume_size only when set, so providers that pre-date this
         # parameter keep working unchanged. A caller that sets volume_size
         # against such a provider will get a clear TypeError pointing at
@@ -735,7 +729,7 @@ class Ec2SandboxEnvironment(SandboxEnvironment):
         self._delete_s3_object(file_key)
 
         if result.success:
-            self.logger.info(f"File {file} written successfully to EC2 instance.")
+            self.logger.debug(f"File {file} written successfully to EC2 instance.")
 
         if not result.success:
             if "is a directory" in result.stderr.casefold():
