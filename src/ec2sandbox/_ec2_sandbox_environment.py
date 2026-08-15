@@ -7,7 +7,7 @@ import string
 import sys
 from datetime import datetime
 from importlib.metadata import entry_points
-from logging import getLogger
+from logging import INFO, NOTSET, getLogger
 from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Set, Union
 
@@ -44,6 +44,14 @@ __all__ = ["Ec2SandboxEnvironment", "Ec2SandboxEnvironmentConfig", "MARKER_TAG_K
 
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 3600
 WAITER_DELAY_SECONDS = 1
+
+# Inspect only lowers its own package loggers below the root WARNING default, so a
+# third-party provider's INFO never reaches the .eval transcript. As an Inspect
+# extension we opt our own logger in, taking the root's level where it is already
+# lower so --log-level debug/trace still reaches us. Guarded on NOTSET so a level
+# set before this import is not clobbered.
+if getLogger("ec2sandbox").level == NOTSET:
+    getLogger("ec2sandbox").setLevel(min(INFO, getLogger().getEffectiveLevel()))
 
 
 @sandboxenv(name="ec2")
@@ -201,8 +209,11 @@ class Ec2SandboxEnvironment(SandboxEnvironment):
             tags=tags,
             **extra,
         )
-        cls.logger.debug(
-            "sample_init: provider returned id=%s region=%s",
+        cls.logger.info(
+            "sample_init: provider=%s type=%s ami=%s id=%s region=%s",
+            type(provider).__name__,
+            resolved.instance_type,
+            resolved.ami_id,
             result.instance_id,
             result.region,
         )
