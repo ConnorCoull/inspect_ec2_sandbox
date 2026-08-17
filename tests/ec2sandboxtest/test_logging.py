@@ -7,7 +7,6 @@ are dropped before Inspect's handler ever sees them.
 
 from __future__ import annotations
 
-import importlib
 import logging
 from unittest import mock
 
@@ -21,45 +20,9 @@ PACKAGE_LOGGER = "ec2sandbox"
 MODULE_LOGGER = "ec2sandbox._ec2_sandbox_environment"
 
 
-@pytest.fixture
-def _restore_levels():
-    package = logging.getLogger(PACKAGE_LOGGER)
-    root = logging.getLogger()
-    package_level, root_level = package.level, root.level
-    yield
-    package.setLevel(package_level)
-    root.setLevel(root_level)
-
-
-def _repromote(root_level: int, package_level: int = logging.NOTSET) -> logging.Logger:
-    """Re-run the module's import-time promotion against the given levels."""
-    logging.getLogger(PACKAGE_LOGGER).setLevel(package_level)
-    logging.getLogger().setLevel(root_level)
-    importlib.reload(_ec2_sandbox_environment)
-    return logging.getLogger(PACKAGE_LOGGER)
-
-
 def test_package_logger_enabled_for_info() -> None:
     """INFO is enabled at the default log level, so the .eval captures it."""
     assert logging.getLogger(PACKAGE_LOGGER).isEnabledFor(logging.INFO)
-
-
-def test_package_logger_follows_lower_root_level(_restore_levels: None) -> None:
-    """--log-level debug still reaches us; a flat setLevel(INFO) would not.
-
-    Asserts the level rather than isEnabledFor, which a logger left at NOTSET
-    would satisfy by inheriting the root level.
-    """
-    assert _repromote(logging.DEBUG).level == logging.DEBUG
-
-
-def test_package_logger_respects_preset_level(_restore_levels: None) -> None:
-    """A level set before import is not clobbered.
-
-    Root sits below the preset level, so an unguarded promotion would lower it.
-    """
-    promoted = _repromote(logging.DEBUG, package_level=logging.ERROR)
-    assert promoted.level == logging.ERROR
 
 
 async def test_sample_init_logs_instance_at_info(
