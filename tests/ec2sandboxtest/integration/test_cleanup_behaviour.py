@@ -12,16 +12,18 @@ from __future__ import annotations
 
 import time
 
+import boto3
 import pytest
-from inspect_ai.util import SandboxEnvironment
 
 from ec2sandbox._ec2_sandbox_environment import (
+    MARKER_TAG_KEY,
     Ec2SandboxEnvironment,
     Ec2SandboxEnvironmentConfig,
 )
 
 from .conftest import (
     instance_state,
+    provision,
     wait_until_terminated,
 )
 
@@ -34,22 +36,11 @@ def _tracked_ids() -> set[str]:
     return {p.instance_id for p in Ec2SandboxEnvironment._tracked_instances}
 
 
-async def _provision(
-    config: Ec2SandboxEnvironmentConfig,
-    task_name: str,
-) -> tuple[dict[str, SandboxEnvironment], str]:
-    envs = await Ec2SandboxEnvironment.sample_init(
-        task_name=task_name, config=config, metadata={}
-    )
-    inst_id = envs["default"].instance_id  # type: ignore[attr-defined]
-    return envs, inst_id
-
-
 async def test_happy_path_terminates_via_sample_cleanup(
     ec2_config: Ec2SandboxEnvironmentConfig,
 ) -> None:
     """sample_cleanup(interrupted=False) terminates the instance and clears the tracker."""  # noqa: E501
-    envs, inst_id = await _provision(ec2_config, "test_happy")
+    envs, inst_id = await provision(ec2_config, "test_happy")
     try:
         assert inst_id in _tracked_ids()
 
@@ -73,7 +64,7 @@ async def test_interrupted_sample_cleanup_skips_then_task_cleanup_sweeps(
     ec2_config: Ec2SandboxEnvironmentConfig,
 ) -> None:
     """sample_cleanup(interrupted=True) leaves the instance alone; task_cleanup sweeps it."""  # noqa: E501
-    envs, inst_id = await _provision(ec2_config, "test_interrupted")
+    envs, inst_id = await provision(ec2_config, "test_interrupted")
     try:
         await Ec2SandboxEnvironment.sample_cleanup(
             task_name="test_interrupted",
@@ -104,7 +95,7 @@ async def test_task_cleanup_respects_no_sandbox_cleanup(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """task_cleanup(cleanup=False) leaves the instance running but clears the tracker."""  # noqa: E501
-    _, inst_id = await _provision(ec2_config, "test_no_cleanup")
+    _, inst_id = await provision(ec2_config, "test_no_cleanup")
     try:
         await Ec2SandboxEnvironment.task_cleanup(
             task_name="shutdown", config=ec2_config, cleanup=False
@@ -125,8 +116,8 @@ async def test_multiple_samples_one_interrupted(
     ec2_config: Ec2SandboxEnvironmentConfig,
 ) -> None:
     """One sample succeeds via sample_cleanup; another, interrupted, is swept by task_cleanup."""  # noqa: E501
-    envs_a, inst_a = await _provision(ec2_config, "test_multi")
-    envs_b, inst_b = await _provision(ec2_config, "test_multi")
+    envs_a, inst_a = await provision(ec2_config, "test_multi")
+    envs_b, inst_b = await provision(ec2_config, "test_multi")
     try:
         assert {inst_a, inst_b}.issubset(_tracked_ids())
 
@@ -162,3 +153,35 @@ async def test_multiple_samples_one_interrupted(
         for inst in (inst_a, inst_b):
             if instance_state(inst) in ("pending", "running"):
                 await provider.terminate_instance(inst, REGION)
+
+
+async def test_cli_cleanup(ec2_config: Ec2SandboxEnvironmentConfig) -> None:
+    _, new_instance_id = await provision(ec2_config, "test_cli_cleanup")
+
+    await Ec2SandboxEnvironment.cli_cleanup(id=None)
+
+    post_cleanup_instance_ids = _read_instance_ids()
+
+    assert new_instance_id not in post_cleanup_instance_ids
+
+
+def _read_instance_ids() -> set[str]:
+    ec2 = boto3.client("ec2")
+    response = ec2.describe_instances(
+        Filters=[
+            {
+                "Name": f"tag:{MARKER_TAG_KEY}",
+                "Values": ["true"],
+            },
+            {
+                "Name": "instance-state-name",
+                "Values": ["pending", "running", "stopping", "stopped"],
+            },
+        ]
+    )
+    instance_ids = set()
+    for reservation in response["Reservations"]:
+        for instance in reservation["Instances"]:
+            instance_ids.add(instance["InstanceId"])
+
+    return instance_ids

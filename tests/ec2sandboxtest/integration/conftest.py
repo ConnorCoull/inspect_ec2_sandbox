@@ -1,11 +1,13 @@
-"""Shared fixtures for the AWS-backed cleanup integration tests."""
+"""Shared fixtures for the AWS-backed integration tests."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import boto3
 import pytest
+from inspect_ai.util import SandboxEnvironment
 
 from ec2sandbox._ec2_sandbox_environment import (
     MARKER_TAG_KEY,
@@ -33,12 +35,26 @@ def _reset_tracker() -> Iterator[None]:
     Ec2SandboxEnvironment._tracked_instances.clear()
 
 
-@pytest.fixture
-def ec2_config() -> Ec2SandboxEnvironmentConfig:
-    overrides = {"instance_type": "t3a.micro"}
+def build_ec2_config(**overrides: Any) -> Ec2SandboxEnvironmentConfig:
     if get_ec2_instance_provider() is not None:
         return Ec2SandboxEnvironmentConfig(**overrides)
     return Ec2SandboxEnvironmentConfig.from_settings(**overrides)
+
+
+@pytest.fixture
+def ec2_config() -> Ec2SandboxEnvironmentConfig:
+    return build_ec2_config(instance_type="t3a.micro")
+
+
+async def provision(
+    config: Ec2SandboxEnvironmentConfig,
+    task_name: str,
+) -> tuple[dict[str, SandboxEnvironment], str]:
+    envs = await Ec2SandboxEnvironment.sample_init(
+        task_name=task_name, config=config, metadata={}
+    )
+    inst_id = envs["default"].instance_id  # type: ignore[attr-defined]
+    return envs, inst_id
 
 
 def instance_state(instance_id: str) -> str | None:
